@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+
+import json
+import sys
+
+from cli import parser
+
+try:
+    import httpx
+except ModuleNotFoundError:
+    print("Error: zetl requires httpx")
+    sys.exit(1)
+
+def main():
+    args = parser()
+    colors = TextColors()
+    try:
+        args.which == "cmd"
+        if args.leader == True:
+            leader_json = Commands(args, colors).leader()
+            print(f"{colors.HEADER}{colors.UNDERLINE}-----ZK-----{colors.ENDC}")
+            print(f"Zookeeper leader: {colors.OKGREEN}{leader_json['leader_ip']}{colors.ENDC}")
+            sys.exit(0)
+        elif args.cluster == True:
+            cluster_members = Commands(args, colors).cluster()
+            print(f"{colors.HEADER}{colors.UNDERLINE}-----ZK-----{colors.ENDC}")
+            print(f"{colors.OKGREEN}{cluster_members}{colors.ENDC}")
+            sys.exit(0)
+        else:
+            print("Four letter commands")
+    except:
+        pass
+
+class Commands():
+    def __init__(self, args, colors):
+        self.args = args
+        self.colors = colors
+        self.url = f"{args.protocol}://{args.addr}:{args.port}"
+        self.status = { "connected": "",
+                        "error": "",
+                        "status_code": "",
+                        "exit_code": "" }
+
+    def leader(self):
+        status = self._zk_error()
+        url = f"{self.url}/commands/leader"
+        if status['connected'] == True:
+            try:
+                response = httpx.get(url)
+                ## Return JSON response
+                return response.json()
+            except:
+                print(f"{self.colors.FAIL}Error: Unable to connect to Zookeeper cluster{self.colors.ENDC}")
+                sys.exit(status['exit_code'])
+        else:
+            print(f"{self.colors.FAIL}Error: Connection timeout when connecting to: {self.url}{self.colors.ENDC}")
+            sys.exit(status['exit_code'])
+
+    def cluster(self):
+        status = self._zk_error()
+        server_list = ""
+        if status['connected'] == True:
+            try:
+                leader = self.leader()['leader_ip']
+                followers = self._get_zk_followers()
+                for i in followers:
+                    if leader != i:
+                        server_list += f"{i}\n"
+                    else:
+                        server_list += f"{i} *\n"
+
+                return server_list.strip()
+            except:
+                print(f"{self.colors.FAIL}Error: Unable to connect to Zookeeper cluster{self.colors.ENDC}")
+                sys.exit(status['exit_code'])
+        else:
+            print(f"{self.colors.FAIL}Error: Connection timeout when connecting to: {self.url}{self.colors.ENDC}")
+            sys.exit(status['exit_code'])
+
+    def _zk_error(self):
+        status = self.status
+        try:
+            response = httpx.get(self.url)
+            status['connected'] = True
+            status['error'] = False
+            status['status_code'] = response.status_code
+            status['exit_code'] = 0
+        except httpx.ConnectError:
+            status['connected'] = False
+            status['error'] = True
+            status['status_code'] = ""
+            status['exit_code'] = 1
+        
+        return status
+
+    def _get_zk_followers(self):
+        status = self._zk_error()
+        url = f"{self.url}/commands/voting_view"
+        if status['connected'] == True:
+            try:
+                servers = []
+                response = httpx.get(url)
+                server_keys = [i for i in response.json()['current_config'].keys()]
+                for server_key in server_keys:
+                    servers.append(response.json()['current_config'][server_key]['server_addresses'][0].split(":")[0])
+                    # split_server = .split("")
+                    # servers.append(split_server[1])
+
+                return servers
+            except:
+                print(f"{self.colors.FAIL}Error: Unable to retrieve ZK followers{self.colors.ENDC}")
+                sys.exit(status['exit_code'])
+        else:
+            print(f"{self.colors.FAIL}Error: Connection timeout when connecting to: {self.url}{self.colors.ENDC}")
+            sys.exit(status['exit_code'])
+
+class TextColors():
+    def __init__(self):
+        self.HEADER = '\033[95m'
+        self.OKBLUE = '\033[94m'
+        self.OKGREEN = '\033[92m'
+        self.WARN = '\033[93m'
+        self.FAIL = '\033[91m'
+        self.ENDC = '\033[0m'
+        self.BOLD = '\033[1m'
+        self.UNDERLINE = '\033[4m'
+
+if __name__ == '__main__':
+    main()
