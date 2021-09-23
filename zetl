@@ -2,7 +2,7 @@
 
 import json
 import sys
-
+import json
 from cli import parser
 
 try:
@@ -11,9 +11,16 @@ except ModuleNotFoundError:
     print("Error: zetl requires httpx")
     sys.exit(1)
 
+try:
+    from kazoo.client import KazooClient
+except ImportError:
+    print("Error: zetl requires kazoo")
+    sys.exit(1)
+
 def main():
     args = parser()
     colors = TextColors()
+    ## Zookeeper four letter word commands
     try:
         args.which == "cmd"
         if args.leader == True:
@@ -22,15 +29,31 @@ def main():
             print(f"Zookeeper leader: {colors.OKGREEN}{leader_json['leader_ip']}{colors.ENDC}")
             sys.exit(0)
         elif args.cluster == True:
-            cluster_members = Commands(args, colors).cluster()
+            kafka_brokers = Commands(args, colors).cluster()
             print(f"{colors.HEADER}{colors.UNDERLINE}-----ZK-----{colors.ENDC}")
-            print(f"{colors.OKGREEN}{cluster_members}{colors.ENDC}")
+            print(f"{colors.OKGREEN}{kafka_brokers}{colors.ENDC}")
             sys.exit(0)
         else:
             print("Four letter commands")
+            sys.exit(0)
+    except:
+        pass
+    ## Kafka cluster information
+    try:
+        args.which == "kafka"
+        if args.brokers == True:
+            kafka_brokers= Kafka(args,colors).brokers()
+            print(f'{colors.HEADER}{colors.UNDERLINE}-----KAFKA-----{colors.ENDC}')
+            print(f"{colors.OKGREEN}{kafka_brokers}{colors.ENDC}")
+            sys.exit(0)
+        else:
+            print("Kafka cluster commands")
     except:
         pass
 
+    sys.exit(0)
+
+## Zookeeper 4LW commands
 class Commands():
     def __init__(self, args, colors):
         self.args = args
@@ -113,6 +136,70 @@ class Commands():
         else:
             print(f"{self.colors.FAIL}Error: Connection timeout when connecting to: {self.url}{self.colors.ENDC}")
             sys.exit(status['exit_code'])
+
+## 
+class Kafka():
+    def __init__(self, args, colors):
+        self.args = args
+        self.colors = colors
+        self.zk_connection = f"{args.addr}:{args.client_port}"
+        self.zk_broker_id_path = '/brokers/ids'
+        self.zk_client = KazooClient(hosts=self.zk_connection)
+        self.broker_hosts = []
+        self.broker_string = ""
+
+    def brokers(self):
+        if self._zk_client_error() == True:
+            print(f"{self.colors.WARN}Error connecting to Zookeeper client at {self.zk_connection}{self.colors.ENDC}")
+            sys.exit(1)
+        else:
+            print("Successful connection to Zookeeper")
+
+
+        broker_ids = self._get_broker_ids()
+
+        if broker_ids == False:
+            print(f"{self.colors.WARN}Error: no Kafka brokers found in Zookeeper path{self.colors.ENDC}")
+            sys.exit(0)
+
+        #print(broker_ids)
+
+        for id in broker_ids:
+            self.broker_hosts.append(self._get_broker_info(id))
+
+        for broker in self.broker_hosts:
+            self.broker_string += f"{broker}\n"
+
+        return self.broker_string.rstrip()
+
+
+    def _get_broker_ids(self):
+        self.zk_client.start()
+        if self.zk_client.exists(self.zk_broker_id_path):
+            broker_ids = self.zk_client.get_children(self.zk_broker_id_path)
+            self.zk_client.stop()
+            return broker_ids
+        else:
+            self.zk_client.stop()
+            return False
+
+    def _get_broker_info(self,broker_id):
+        self.zk_client.start()
+        broker_data = f'{self.zk_broker_id_path}/{broker_id}'
+        try:
+            data, _ = self.zk_client.get(broker_data)
+            data_json = json.loads(data.decode('utf-8'))
+            return data_json['host']
+        except:
+            return f'Error retrieving broker: {broker_id}'
+
+    def _zk_client_error(self):
+        try:
+            self.zk_client.start()
+            self.zk_client.stop()
+            return False
+        except:
+            return True
 
 class TextColors():
     def __init__(self):
