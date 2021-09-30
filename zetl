@@ -153,7 +153,8 @@ class Kafka():
             print(f"{self.colors.WARN}Error connecting to Zookeeper client at {self.zk_connection}{self.colors.ENDC}")
             sys.exit(1)
         else:
-            print("Successful connection to Zookeeper")
+            #print("Successful connection to Zookeeper")
+            pass
 
 
         broker_ids = self._get_broker_ids()
